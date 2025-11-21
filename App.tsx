@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import type { JourneyNode, TrackDefinition } from './types';
 import { INITIAL_NODES, TRACKS, REGIONAL_NODES, HOSPITAL_NODES } from './constants';
@@ -109,16 +108,16 @@ const Modal = ({ node, onClose }: { node: JourneyNode | null; onClose: () => voi
   const adminIdList = node.adminWechatIds || [];
   
   // Determine display data based on mode and index
-  let qrSrc = '';
+  let rawQrSrc = '';
   let displayId = node.wechatId;
   let displayLabel = '';
 
   if (hasGroupQr) {
-    qrSrc = node.qrImageUrl!;
+    rawQrSrc = node.qrImageUrl!;
     displayLabel = '群名称 / ID';
     displayId = node.wechatId;
   } else if (adminQrList.length > 0) {
-    qrSrc = adminQrList[adminIndex];
+    rawQrSrc = adminQrList[adminIndex];
     // Try to get specific admin ID, fallback to node default if missing
     displayId = adminIdList[adminIndex] || node.wechatId;
     
@@ -129,9 +128,22 @@ const Modal = ({ node, onClose }: { node: JourneyNode | null; onClose: () => voi
     }
   } else {
     // Fallback generic QR
-    qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=WeChat:${node.wechatId}&color=1e293b`;
+    rawQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=WeChat:${node.wechatId}&color=1e293b`;
     displayLabel = '管理员微信号';
   }
+
+  // FIX: Handle HTTP images on HTTPS sites (Mixed Content)
+  // We use a secure proxy (wsrv.nl) to fetch HTTP images over HTTPS
+  const getSafeSrc = (url: string) => {
+    if (url && url.startsWith('http://')) {
+       // Clean protocol for wsrv.nl
+       const clean = url.replace(/^http:\/\//, '');
+       return `https://wsrv.nl/?url=${clean}`; 
+    }
+    return url;
+  };
+  
+  const qrSrc = getSafeSrc(rawQrSrc);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(displayId);
@@ -172,8 +184,11 @@ const Modal = ({ node, onClose }: { node: JourneyNode | null; onClose: () => voi
                     key={qrSrc} // Force re-render on change
                     src={qrSrc} 
                     alt="QR Code" 
+                    // referrerPolicy="no-referrer" helps to load images from servers with hotlink protection
+                    referrerPolicy="no-referrer"
                     className="w-full h-full object-cover"
                     onError={(e) => {
+                      // If even the proxy fails, show error placeholder
                       (e.target as HTMLImageElement).src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=Error&color=ef4444`;
                     }}
                   />
