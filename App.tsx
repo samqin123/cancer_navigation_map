@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { JourneyNode, TrackDefinition } from './types';
 import { INITIAL_NODES, TRACKS, REGIONAL_NODES, HOSPITAL_NODES } from './constants';
 
@@ -18,6 +18,9 @@ const UsersIcon = () => (
 );
 const CopyIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+);
+const RefreshIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
 );
 
 // --- UI Sub-components ---
@@ -80,14 +83,16 @@ const TrackSection = ({ track, onNodeClick }: { track: TrackDefinition; onNodeCl
 
 const Modal = ({ node, onClose }: { node: JourneyNode | null; onClose: () => void }) => {
   const [copied, setCopied] = useState(false);
+  // Index to cycle through multiple admin QRs
+  const [adminIndex, setAdminIndex] = useState(0);
+
+  // Reset to first admin when node changes
+  useEffect(() => {
+    setAdminIndex(0);
+    setCopied(false);
+  }, [node]);
 
   if (!node) return null;
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(node.wechatId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const themeColor = node.category === 'clinical' ? 'bg-blue-600' : 
                      node.category === 'psychological' ? 'bg-rose-500' : 
@@ -95,9 +100,55 @@ const Modal = ({ node, onClose }: { node: JourneyNode | null; onClose: () => voi
                      node.category === 'molecular' ? 'bg-purple-600' : 
                      node.category === 'complication' ? 'bg-orange-500' : 'bg-slate-600';
 
+  // LOGIC:
+  // 1. If node.qrImageUrl exists, show Group QR. Do not show admin QRs.
+  // 2. If NO Group QR, show Admin QRs (node.adminQrCodes). Allow cycling if > 1.
+  
+  const hasGroupQr = Boolean(node.qrImageUrl && node.qrImageUrl.trim() !== '');
+  const adminQrList = node.adminQrCodes && node.adminQrCodes.length > 0 ? node.adminQrCodes : [];
+  const adminIdList = node.adminWechatIds || [];
+  
+  // Determine display data based on mode and index
+  let qrSrc = '';
+  let displayId = node.wechatId;
+  let displayLabel = '';
+
+  if (hasGroupQr) {
+    qrSrc = node.qrImageUrl!;
+    displayLabel = '群名称 / ID';
+    displayId = node.wechatId;
+  } else if (adminQrList.length > 0) {
+    qrSrc = adminQrList[adminIndex];
+    // Try to get specific admin ID, fallback to node default if missing
+    displayId = adminIdList[adminIndex] || node.wechatId;
+    
+    if (adminQrList.length > 1) {
+      displayLabel = `管理员 (${adminIndex + 1}/${adminQrList.length}) 微信号`;
+    } else {
+      displayLabel = '管理员微信号';
+    }
+  } else {
+    // Fallback generic QR
+    qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=WeChat:${node.wechatId}&color=1e293b`;
+    displayLabel = '管理员微信号';
+  }
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(displayId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleNextAdmin = () => {
+    if (adminQrList.length > 1) {
+      setAdminIndex((prev) => (prev + 1) % adminQrList.length);
+      setCopied(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden relative animate-scale-in">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden relative animate-scale-in flex flex-col max-h-[90vh]">
         <button 
           onClick={onClose}
           className="absolute top-4 right-4 p-2 bg-white/20 text-white hover:bg-white/30 rounded-full transition-colors z-10 backdrop-blur-sm"
@@ -105,33 +156,61 @@ const Modal = ({ node, onClose }: { node: JourneyNode | null; onClose: () => voi
           <CloseIcon />
         </button>
         
-        <div className={`h-28 ${themeColor} flex items-center justify-center relative overflow-hidden`}>
+        <div className={`shrink-0 h-28 ${themeColor} flex items-center justify-center relative overflow-hidden`}>
            <div className="absolute inset-0 opacity-10 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiNmZmYiLz48L3N2Zz4=')]"></div>
-           <h2 className="text-white font-bold text-xl relative z-10 drop-shadow-md">加入社群</h2>
+           <h2 className="text-white font-bold text-xl relative z-10 drop-shadow-md">
+             {hasGroupQr ? '加入社群' : '联系管理员'}
+           </h2>
         </div>
         
-        <div className="p-6 text-center -mt-12 relative z-20">
-          <div className="bg-white p-3 rounded-2xl shadow-lg inline-block mb-4">
-             {/* Simulated QR Code - Using a public API for QR generation for demo purposes */}
-             <div className="w-36 h-36 bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center border border-slate-100">
-                <img 
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=WeChat:${node.wechatId}&color=1e293b`} 
-                  alt="Group QR Code" 
-                  className="w-full h-full p-2"
-                />
-             </div>
+        <div className="p-6 text-center -mt-12 relative z-20 overflow-y-auto">
+          {/* QR Code Area */}
+          <div className="relative inline-block group/qr">
+            <div className="bg-white p-3 rounded-2xl shadow-lg inline-block mb-4 relative z-10">
+              <div className="w-48 h-48 bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center border border-slate-100 relative">
+                  <img 
+                    key={qrSrc} // Force re-render on change
+                    src={qrSrc} 
+                    alt="QR Code" 
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=Error&color=ef4444`;
+                    }}
+                  />
+              </div>
+            </div>
+            
+            {/* Badge indicating current mode */}
+            <div className={`absolute -bottom-0 -right-2 z-20 text-[10px] font-bold px-2 py-1 rounded-full shadow-md border-2 border-white ${hasGroupQr ? 'bg-blue-600 text-white' : 'bg-slate-800 text-white'}`}>
+              {hasGroupQr ? '群二维码' : (adminQrList.length > 1 ? `管理员 ${adminIndex + 1}` : '管理员')}
+            </div>
           </div>
+          
+          {/* Admin Cycle Button - Only shown if NOT group mode AND multiple admins exist */}
+          {!hasGroupQr && adminQrList.length > 1 && (
+            <div className="flex justify-center mb-4">
+               <button 
+                 onClick={handleNextAdmin}
+                 className="flex items-center gap-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-full transition-colors"
+               >
+                 <RefreshIcon />
+                 切换管理员 ({adminIndex + 1}/{adminQrList.length})
+               </button>
+            </div>
+          )}
           
           <h3 className="text-lg font-bold text-slate-800 mb-1">{node.title}</h3>
           <p className="text-sm text-slate-500 mb-6 px-4 leading-tight">{node.description || node.subtitle}</p>
           
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mx-2">
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold mb-2">群主 / 管理员微信号</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold mb-2">
+              {displayLabel}
+            </p>
             <div className="flex items-center justify-between bg-white border border-slate-200 rounded-lg p-2 pl-3 shadow-sm">
-              <span className="font-mono text-slate-700 font-medium select-all text-sm">{node.wechatId}</span>
+              <span className="font-mono text-slate-700 font-medium select-all text-sm truncate mr-2">{displayId}</span>
               <button 
                 onClick={handleCopy}
-                className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-md transition-all ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
+                className={`flex-shrink-0 flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-md transition-all ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
               >
                 {copied ? <span>已复制</span> : <><CopyIcon /> <span>复制</span></>}
               </button>
@@ -139,7 +218,9 @@ const Modal = ({ node, onClose }: { node: JourneyNode | null; onClose: () => voi
           </div>
           
           <p className="mt-4 text-xs text-slate-400">
-            请使用微信扫描上方二维码，或复制微信号手动添加
+            {hasGroupQr 
+              ? '请使用微信扫描上方二维码，直接加入互助群' 
+              : '当前群组需审核，请添加管理员微信，备注“入群”'}
           </p>
         </div>
       </div>
@@ -162,12 +243,12 @@ export default function App() {
             肿瘤患者全病程支持平台
           </div>
           <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-4 leading-tight tracking-tight">
-            抗癌社群 <span className="text-blue-600">导航地图</span>
+            癌症患者社群 <span className="text-blue-600">导航地图</span>
           </h1>
           <p className="text-slate-600 max-w-2xl text-sm md:text-base leading-relaxed">
-            临床治疗 · 心理疏导 · 营养干预 — 为您提供全方位的抗癌支持体系。
+            临床 · 心理 · 营养 三线并行，全程陪伴。
             <br className="hidden md:block"/>
-            请根据您当前的治疗阶段或需求，选择加入相应的互助小组。
+            按诊疗阶段/需求一键直达，扫码入群。
           </p>
         </div>
       </header>
@@ -178,7 +259,7 @@ export default function App() {
         <section>
           <div className="flex items-center gap-2 mb-4">
             <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-white text-xs font-bold">1</span>
-            <h3 className="text-sm font-bold text-slate-700">初始指引 · 确诊初期</h3>
+            <h3 className="text-sm font-bold text-slate-700">初始入口</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {INITIAL_NODES.map(node => (
@@ -203,7 +284,7 @@ export default function App() {
         <section>
            <div className="flex items-center gap-2 mb-6">
             <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-white text-xs font-bold">2</span>
-            <h3 className="text-sm font-bold text-slate-700">详细旅程 · 专项支持</h3>
+            <h3 className="text-sm font-bold text-slate-700">全病程支持路径</h3>
           </div>
           <div className="bg-white rounded-2xl border border-slate-200 p-6 md:p-8 shadow-sm">
             {TRACKS.map(track => (
@@ -218,7 +299,7 @@ export default function App() {
           <div>
             <div className="flex items-center gap-2 mb-4">
               <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-white text-xs font-bold">3</span>
-              <h3 className="text-sm font-bold text-slate-700">区域互助组织</h3>
+              <h3 className="text-sm font-bold text-slate-700">地域病友分支</h3>
             </div>
             <div className="bg-white p-6 rounded-2xl border border-slate-200 grid grid-cols-2 gap-3 shadow-sm">
               {REGIONAL_NODES.map(node => (
@@ -238,7 +319,7 @@ export default function App() {
           <div>
              <div className="flex items-center gap-2 mb-4">
               <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-white text-xs font-bold">4</span>
-              <h3 className="text-sm font-bold text-slate-700">名医/专科就医群</h3>
+              <h3 className="text-sm font-bold text-slate-700">三甲医院专属群</h3>
             </div>
             <div className="space-y-3">
               {HOSPITAL_NODES.map(node => (
